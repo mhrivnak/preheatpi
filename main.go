@@ -16,6 +16,8 @@ import (
 	"gobot.io/x/gobot/platforms/raspi"
 )
 
+const retryDelay = 30 * time.Second
+
 type Relay struct {
 	Pin    int
 	ID     string
@@ -63,31 +65,15 @@ func main() {
 	}
 	for {
 	}
-	/*
-			relay1 := gpio.NewRelayDriver(r, "8")
-			relay1.Inverted = true
-			relay2 := gpio.NewRelayDriver(r, "10")
-			relay2.Inverted = true
-
-		for {
-			relay1.On()
-			fmt.Println("relay 1 on")
-			time.Sleep(1 * time.Second)
-			relay1.Off()
-			fmt.Println("relay 1 off")
-			time.Sleep(1 * time.Second)
-		}
-	*/
 }
 
 func watch(apiURL, username string, relay Relay) {
-	log.Info(apiURL)
 	observedVersion := -1
 	for {
 		resourceURL, err := url.Parse(apiURL)
 		if err != nil {
 			log.WithError(err).Error("error parsing URL")
-			time.Sleep(30 * time.Second)
+			time.Sleep(retryDelay)
 			continue
 		}
 		resourceURL.Path = path.Join(resourceURL.Path, "users", username, "heaters", relay.ID)
@@ -98,32 +84,35 @@ func watch(apiURL, username string, relay Relay) {
 			values.Add("version", strconv.Itoa(observedVersion))
 			resourceURL.RawQuery = values.Encode()
 		}
-		log.Info(resourceURL.String())
+		log.Infof("GET %s", resourceURL.String())
 		resp, err := http.Get(resourceURL.String())
 		if err != nil {
 			log.WithError(err).Error("error talking to API")
-			time.Sleep(30 * time.Second)
+			time.Sleep(retryDelay)
+			continue
+		}
+		if resp.StatusCode != http.StatusOK {
+			log.Errorf("Received unexpected http response code %d", resp.StatusCode)
+			time.Sleep(retryDelay)
 			continue
 		}
 		data, err := ioutil.ReadAll(resp.Body)
 		if err != nil {
 			log.WithError(err).Error("error reading response body")
-			time.Sleep(30 * time.Second)
+			time.Sleep(retryDelay)
 			continue
 		}
 		response := Response{}
 		err = json.Unmarshal(data, &response)
 		if err != nil {
 			log.WithError(err).Error("error decoding json")
-			log.Info(string(data))
-			time.Sleep(30 * time.Second)
+			log.Error(string(data))
+			time.Sleep(retryDelay)
 			continue
 		}
 		log.Infof("setting relay %s to %s", relay.ID, response.Value)
 		switch response.Value {
 		case "on":
-			relay.Driver.On()
-			time.Sleep(1 * time.Second)
 			relay.Driver.On()
 		case "off":
 			relay.Driver.Off()
